@@ -4,17 +4,23 @@ Garrulity Object Relational Mapping System.
 */
 namespace Fratello\DB;
 
+use Closure;
+use Fratello\Collection\Collection;
 use Exception;
+use stdClass;
 
 class Q{
     private $pdo;
-    private $sql;
+    private $sql = '';
     private $term = [];
     private $database;
     private $tbname;
     private $col_name;
     private $transaction;
     private $already_orderby = false;
+    private $property_class = 'stdClass';
+    private $more_already = false;
+    private $stmt;
 
     public function __construct(bool $create_mode = false, string $bootstrap_sql = '', array $bootstrap_sql_value = []){
         $rdb = 'mysql';
@@ -115,16 +121,6 @@ class Q{
         return $this;
     }
 
-    public function pull(int $id){
-        $SQL = 'SELECT * FROM `'.trim($this->tbname).'` WHERE id = ?';
-        $stmt = $this->pdo->prepare($SQL);
-        $stmt->execute([$id]);
-        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
-        $this->sql = $SQL;
-        $this->confirm();
-        return $result;
-    }
-
     public function join(string $join_out_table, string $join_out_col, string $join_col_basetbl, bool $inner = false,  bool $right = false){
         if($inner){
             $SQL = 'INNER JOIN ';
@@ -159,6 +155,10 @@ class Q{
     }
 
     public function where(string $col, $value, bool $isNot = false){
+        if($this->sql == ''){
+            $this->select('*');
+        }
+        
         if($isNot){
             $where = ' WHERE NOT ';
         }else{
@@ -201,18 +201,110 @@ class Q{
         return $this;
     }
 
+    protected function ClassSet(string $className){
+        $this->property_class = $className;
+    }
+
     public function to_sql(){
         return $this->sql;
     }
 
+    public function pull(int $id){
+        $SQL = 'SELECT * FROM `'.trim($this->tbname).'` WHERE id = ?';
+        $stmt = $this->pdo->prepare($SQL);
+        $stmt->execute([$id]);
+        $stmt->setFetchMode(\PDO::FETCH_CLASS, $this->property_class);
+        $result = $stmt->fetch();
+        $this->sql = $SQL;
+        $this->confirm();
+        return $result;
+    }
+
     public function top(){       
+        if($this->sql == ''){
+            $this->select('*');
+        }
+        
         $stmt = $this->pdo->prepare($this->sql);
         $stmt->execute($this->term);
-        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stmt->setFetchMode(\PDO::FETCH_CLASS, $this->property_class);
+        $result = $stmt->fetch();
 
         $this->confirm();
 
         return $result;
+    }
+
+    public function gather(){
+        if($this->sql == ''){
+            $this->select('*');
+        }
+        $stmt = $this->pdo->prepare($this->sql);
+        $stmt->execute($this->term);
+        $stmt->setFetchMode(\PDO::FETCH_CLASS, $this->property_class);
+        $result = $stmt->fetchAll();
+        $result = new Collection($result);
+
+        $this->confirm();
+
+        return $result;
+    }
+
+    public function designate(string $col_name){
+        $get = $this->top;
+        
+        return $get->$$col_name;
+    }
+
+    public function specify(string $value, string $key = ''){
+        $base = $this->gather();
+        $result = $base->specify($value, $key);
+        return $result;
+    }
+
+    public function more(){
+        if(!$this->more_already){
+            if($this->sql == ''){
+                $this->select('*');
+            }
+            $stmt = $this->pdo->prepare($this->sql);
+            $stmt->execute($this->term);
+            $stmt->setFetchMode(\PDO::FETCH_CLASS, $this->property_class);
+            $this->stmt = $stmt;
+        }
+        return $this->stmt->fetch();
+    }
+
+    public function dominate_up(int $limit, Closure $function){
+        $next_id = 0;
+
+        while(true){
+            $limit = ' LIMIT ';
+            if($next_id == 0){
+                $limit .= $limit;
+            }else{
+                $limit .= $next_id.', '.$limit;
+            }
+
+            if($this->sql == ''){
+                $this->select('*');
+            }
+            $stmt = $this->pdo->prepare($this->sql.$limit);
+            $stmt->execute($this->term);
+            $stmt->setFetchMode(\PDO::FETCH_CLASS, $this->property_class);
+            $result = $stmt->fetchAll();
+            $result = new Collection($result);
+
+            $this->confirm();
+
+            $next_id += $limit;
+
+            $is_stop = $function($result);
+
+            if(is_bool($is_stop) && !$is_stop || $result->count() == 0){
+                break;
+            }
+        }
     }
 
     public function confirm(){
