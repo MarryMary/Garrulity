@@ -163,10 +163,6 @@ class Q{
         }
     }
 
-    public function safety_lock(){
-        //TODO
-    }
-
     public function join(string $join_out_table, string $join_out_col, string $join_col_basetbl, bool $inner = false,  bool $right = false){
         if($inner){
             $SQL = 'INNER JOIN ';
