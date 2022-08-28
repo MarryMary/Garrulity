@@ -18,6 +18,7 @@ class Q{
     private $col_name;
     private $transaction;
     private $already_orderby = false;
+    private $already_groupby = false;
     private $property_class = 'stdClass';
     private $more_already = false;
     private $stmt;
@@ -121,6 +122,51 @@ class Q{
         return $this;
     }
 
+    public function insert(array $value){
+        $SQL = 'INSERT INTO '.trim($this->tbname);
+        $col = [];
+        $val = [];
+        foreach($value as $column => $values){
+            array_push($col, $column);
+            array_push($val, $values);
+        }
+
+        $SQL .= ' (`'.implode('`, `', $col).'`) VALUES ('.implode(', ', $val).')';
+
+        $this->sql = $SQL;
+        return $this;
+    }
+
+    public function update(array $value){
+        $SQL = 'UPDATE '.trim($this->tbname).' SET ';
+        foreach($value as $column => $values){
+            $SQL .= '`'.trim($column).'` = '.trim($values);
+        }
+
+        $this->sql = $SQL;
+        return $this;
+    }
+
+    public function delete(){
+        $this->sql = 'DELETE FROM '.trim($this->tbname);
+        return $this;
+    }
+
+    public function truncate(bool $unconfirmed_execute = false){
+        $SQL = 'TRUNCATE TABLE '.trim($this->tbname);
+        if($unconfirmed_execute){
+            $stmt = $this->pdo->prepare($SQL);
+            $stmt->execute();
+            $this->confirm();
+        }else{
+            return $this;
+        }
+    }
+
+    public function safety_lock(){
+        //TODO
+    }
+
     public function join(string $join_out_table, string $join_out_col, string $join_col_basetbl, bool $inner = false,  bool $right = false){
         if($inner){
             $SQL = 'INNER JOIN ';
@@ -154,49 +200,75 @@ class Q{
         return $this;
     }
 
-    public function where(string $col, $value, bool $isNot = false){
+    private function where_create(string $type, string $col, string $operator, $value){
         if($this->sql == ''){
             $this->select('*');
         }
-        
+        $SQL = $type.'`'.trim($col).'` '.trim($operator).' ?';
+        $this->sql = $SQL;
+        $this->term = [$value];
+    }
+
+    public function having(string $col, $operator, $value = ''){
+        $having = ' HAVING ';
+
+        if($value == ''){
+            $value = $operator;
+            $operator = '=';
+        }
+
+        $this->where_create($having, $col, $operator, $value);
+
+        return $this;
+    }
+
+    public function where(string $col, $operator, $value = '', bool $isNot = false){        
         if($isNot){
             $where = ' WHERE NOT ';
         }else{
             $where = ' WHERE ';
         }
-        $SQL = $where.'`'.trim($col).'` = ?';
 
-        $this->sql = $SQL;
-        $this->term = [$value];
+        if($value == ''){
+            $value = $operator;
+            $operator = '=';
+        }
+
+        $this->where_create($where, $col, $operator, $value);
         
         return $this;
     }
 
-    public function and(string $col, $value, bool $isNot = false){
+    public function and(string $col, $operator, $value = '', bool $isNot = false){
         if($isNot){
             $and = ' AND NOT ';
         }else{
             $and = ' AND ';
         }
-        $SQL = $and.'`'.trim($col).'` = ?';
+        
+        if($value == ''){
+            $value = $operator;
+            $operator = '=';
+        }
 
-        $this->sql .= $SQL;
-        array_push($this->term, $value);
+        $this->where_create($and, $col, $operator, $value);
         
         return $this;
     }
 
-    public function or(string $col, $value, bool $isNot = false){
+    public function or(string $col, $operator, $value = '', bool $isNot = false){
         if($isNot){
             $or = ' OR NOT ';
         }else{
             $or = ' OR ';
         }
 
-        $SQL = $or.'`'.trim($col).'` = ?';
+        if($value == ''){
+            $value = $operator;
+            $operator = '=';
+        }
 
-        $this->sql .= $SQL;
-        array_push($this->term, $value);
+        $this->where_create($or, $col, $operator, $value);
         
         return $this;
     }
@@ -307,7 +379,50 @@ class Q{
         }
     }
 
-    public function confirm(){
+    public function union(Q $garrulity, bool $type = false){
+        if($type){
+            $SQL = ' UNION ALL ';
+        }else{
+            $SQL = ' UNION ';
+        }
+
+        $SQL .= $garrulity->to_sql();
+        $this->sql = $SQL;
+
+        return $this;
+    }
+
+    public function group_by(string $colname){
+        $SQL = '`'.trim($colname).'` ';
+
+        if($this->already_groupby){
+            $this->sql .= ', ';
+        }else{
+            $this->sql .= 'GROUP BY '.$SQL;
+        }
+
+        return $this;
+    }
+
+    public function IsIn(){
+        if($this->sql == ''){
+            $this->select('*');
+        }
+        $count = $this->gather()->count();
+        if($count != 0){
+            return true;
+        }else{
+            return false;
+        }
+    }
+
+    public function enter(){
+        $stmt = $this->pdo->prepare($this->sql);
+        $stmt->execute($this->term);
+        $this->confirm();
+    }
+
+    private function confirm(){
         try{
             if($this->transaction){
                 $this->pdo->commit();
